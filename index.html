@@ -291,14 +291,16 @@ canvas#petals{position:fixed; inset:0; z-index:1; pointer-events:none;}
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
 import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
-// Same project as your main "Sorav Temps" site — do not change.
+// Same project as the Ditemps website (ditemps.html) — this is where
+// saveCardData() actually writes every card, so the template must read
+// from THIS project, not the old "soravtemps-d5419" one.
 const firebaseConfig = {
-  apiKey: "AIzaSyCRAO7UDddkFKvKbGGBBtkruD22NZnNozU",
-  authDomain: "soravtemps-d5419.firebaseapp.com",
-  projectId: "soravtemps-d5419",
-  storageBucket: "soravtemps-d5419.firebasestorage.app",
-  messagingSenderId: "889624784593",
-  appId: "1:889624784593:web:3a325467962639facedff0"
+  apiKey: "AIzaSyDneahIyDuurQB30uGrM0iC6xkDv71yUjo",
+  authDomain: "ditemps.firebaseapp.com",
+  projectId: "ditemps",
+  storageBucket: "ditemps.firebasestorage.app",
+  messagingSenderId: "14858245467",
+  appId: "1:14858245467:web:97cdf1133278e001c6367e"
 };
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
