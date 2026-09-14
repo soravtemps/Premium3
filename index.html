@@ -365,7 +365,7 @@ function setupBackgroundMusic(CARD){
   if(!CARD.musicUrl) return; // no song uploaded for this card — stay silent
   bgAudio = new Audio(CARD.musicUrl);
   bgAudio.loop = true;
-  bgAudio.volume = 0.55;
+  bgAudio.volume = 0.5;
   muteBtn.classList.add('visible');
 }
 
@@ -415,8 +415,10 @@ gift.addEventListener('click', ()=>{
   // This tap is the "real user gesture" browsers wait for — safe to start
   // audio right here.
   if(revealAudio){
-    // Surprise song plays once as the "ta-da" moment; the looping background
-    // song (if any) fades in right after it finishes, instead of overlapping.
+    // Surprise song plays once as the "ta-da" moment. Background music (if
+    // it's somehow already playing, e.g. after a replay) is paused first so
+    // the two never mix — it resumes automatically once reveal finishes.
+    if(bgAudio && !bgAudio.paused) bgAudio.pause();
     revealAudio.currentTime = 0;
     revealAudio.play().catch(()=>{ /* still blocked — mute icon stays, visitor can tap it */ });
     revealAudio.addEventListener('ended', ()=>{
@@ -625,6 +627,11 @@ document.getElementById('replay-btn').addEventListener('click', ()=>{
   charms.forEach(c=>c.classList.remove('done'));
   document.querySelectorAll('.progress-row span').forEach(s=>s.classList.remove('on'));
   continueBtn.classList.remove('show');
+  // Stop both tracks so opening the gift again replays cleanly from the
+  // top, instead of the reveal song landing on top of background music
+  // that was still playing from the previous run.
+  if(revealAudio){ revealAudio.pause(); revealAudio.currentTime = 0; }
+  if(bgAudio){ bgAudio.pause(); }
   goTo('screen-1');
 });
 
