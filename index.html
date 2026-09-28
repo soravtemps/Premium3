@@ -314,9 +314,10 @@ const DEFAULTS = {
   photoCaption: "You make every moment special ♥",
   photoSrc: "",
   finalNote: "Always keep smiling, okay? 🌸 You deserve every bit of happiness this world has to offer.\n\nThank you for standing by my side, for loving me, and for making my life so much more beautiful.\n\nAnd one last thing before this little surprise ends...\n\nI love you sooooo, sooo much. ♾",
-  musicUrl: "",       // background track — user-uploaded mp3, saved under `music` in Firestore
-  revealSongUrl: ""   // surprise song — a SEPARATE user-uploaded mp3, saved under `revealSong`,
-                       // plays once as a "ta-da" the moment the gift box is tapped open
+  musicUrl: "",       // background track — user-uploaded mp3, saved under `music` or `bgMusic`
+  favMusicUrl: "",    // favorite music — saved under `favMusic`, `song`, or falls back to `music`
+  songLabel: "Our Favorite Song",
+  revealSongUrl: ""   // surprise song — plays once as a "ta-da" the moment the gift box is tapped open
 };
 
 window.CARD = { ...DEFAULTS };
@@ -335,7 +336,9 @@ async function loadCard(){
         window.CARD.letter        = d.letter || d.message || DEFAULTS.letter;
         window.CARD.finalNote     = d.finalNote || d.memory || DEFAULTS.finalNote;
         window.CARD.photoSrc      = (d.photoUrls && d.photoUrls[0]) ? d.photoUrls[0] : DEFAULTS.photoSrc;
-        window.CARD.musicUrl      = d.music || DEFAULTS.musicUrl;
+        window.CARD.musicUrl      = d.bgMusic || d.music || DEFAULTS.musicUrl;
+        window.CARD.favMusicUrl   = d.favMusic || d.favouriteMusic || d.favoriteMusic || d.song || d.favSong || d.music || DEFAULTS.favMusicUrl;
+        window.CARD.songLabel     = d.songLabel || d.songName || d.songTitle || DEFAULTS.songLabel;
         window.CARD.revealSongUrl = d.revealSong || DEFAULTS.revealSongUrl;
       }
     }catch(err){
@@ -354,37 +357,45 @@ loadCard();
      Waits for the "card-ready" event above before touching the DOM.
 ============================================================ -->
 <script>
-// ---------- background music (shared across the whole page + the modal) ----------
-// One single Audio instance for the entire visit. Created here but only
-// .play()'d on the gift-box tap below, because that tap is a real user
-// gesture — browsers require one before they'll allow audio with sound.
+// ---------- audio management (Background Music & Favorite Music) ----------
 let bgAudio = null;
+let favAudio = null;
+let revealAudio = null;
+let bgWasPlayingBeforeModal = false;
 const muteBtn = document.getElementById('bg-mute');
 
 function setupBackgroundMusic(CARD){
-  if(!CARD.musicUrl) return; // no song uploaded for this card — stay silent
-  bgAudio = new Audio(CARD.musicUrl);
+  const bgUrl = CARD.musicUrl;
+  if(!bgUrl) return;
+  bgAudio = new Audio(bgUrl);
   bgAudio.loop = true;
   bgAudio.volume = 0.5;
   muteBtn.classList.add('visible');
 }
 
+function setupFavMusic(CARD){
+  const favUrl = CARD.favMusicUrl || CARD.musicUrl;
+  if(!favUrl) return;
+  favAudio = new Audio(favUrl);
+  favAudio.volume = 0.85;
+}
+
 // ---------- surprise music (one-shot "ta-da" the instant the gift opens) ----------
-// A SEPARATE track from the background song above. Plays once, at full
-// volume, the moment the gift box is tapped — then the looping background
-// song (if any) takes over for the rest of the visit.
-let revealAudio = null;
 function setupRevealMusic(CARD){
-  if(!CARD.revealSongUrl) return; // no surprise song uploaded — skip silently
+  if(!CARD.revealSongUrl) return;
   revealAudio = new Audio(CARD.revealSongUrl);
   revealAudio.volume = 0.85;
 }
 
 muteBtn.addEventListener('click', ()=>{
-  if(!bgAudio) return;
-  bgAudio.muted = !bgAudio.muted;
-  muteBtn.textContent = bgAudio.muted ? '🔇' : '🔊';
-  muteBtn.classList.toggle('muted', bgAudio.muted);
+  if(bgAudio){
+    bgAudio.muted = !bgAudio.muted;
+    muteBtn.textContent = bgAudio.muted ? '🔇' : '🔊';
+    muteBtn.classList.toggle('muted', bgAudio.muted);
+  }
+  if(favAudio && !favAudio.paused){
+    favAudio.muted = bgAudio ? bgAudio.muted : !favAudio.muted;
+  }
 });
 
 window.addEventListener('card-ready', () => {
@@ -396,6 +407,7 @@ window.addEventListener('card-ready', () => {
   document.getElementById('s3-name').textContent = 'For ' + CARD.recipientName;
 
   setupBackgroundMusic(CARD);
+  setupFavMusic(CARD);
   setupRevealMusic(CARD);
 
   document.getElementById('loader').classList.add('hide');
@@ -457,8 +469,17 @@ const modalBody = document.getElementById('modal-body');
 
 function closeModal(){
   overlay.classList.remove('show');
-  // bgAudio deliberately keeps playing after the modal closes — it's the
-  // background track for the whole page, not just this card's controls.
+  
+  // Jab modal close ho, favourite music ko pause/reset karo
+  if(favAudio && !favAudio.paused){
+    favAudio.pause();
+  }
+
+  // Aur agar background music favourite music bajne se pehle chal raha tha, toh use wapas resume karo
+  if(bgWasPlayingBeforeModal && bgAudio && bgAudio.paused){
+    bgAudio.play().catch(()=>{});
+    bgWasPlayingBeforeModal = false;
+  }
 }
 overlay.addEventListener('click', e=>{ if(e.target === overlay) closeModal(); });
 
@@ -471,7 +492,14 @@ function openModal(kind){
   modalBody.querySelector('.modal-close').addEventListener('click', closeModal);
 
   if(kind === 'letter') typeText(modalBody.querySelector('.letter-body'), CARD.letter, 22);
-  if(kind === 'music')  startPlayer(modalBody, CARD);
+  if(kind === 'music') {
+    // Music modal khulte hi check karo: agar background music chal raha hai toh use pause karo
+    if(bgAudio && !bgAudio.paused){
+      bgWasPlayingBeforeModal = true;
+      bgAudio.pause();
+    }
+    startPlayer(modalBody, CARD);
+  }
 }
 
 function letterMarkup(CARD){
@@ -498,14 +526,15 @@ function photoMarkup(CARD){
 }
 
 function musicMarkup(CARD){
-  if(!CARD.musicUrl || !bgAudio){
+  const hasSong = (CARD.favMusicUrl || CARD.musicUrl) && (favAudio || bgAudio);
+  if(!hasSong){
     return `
       <button class="modal-close">✕</button>
       <div class="player">
         <p class="now">Playing just for ${CARD.recipientName}</p>
         <div class="art"><div class="music-fallback">🎵</div></div>
         <div class="song-title">No song chosen</div>
-        <p class="no-music-note">This card was made without a background song.</p>
+        <p class="no-music-note">This card was made without a song.</p>
       </div>
     `;
   }
@@ -516,7 +545,7 @@ function musicMarkup(CARD){
       <div class="art"><div class="music-fallback">🎵</div></div>
       <div style="display:flex; align-items:center; gap:10px;">
         <div>
-          <div class="song-title">${CARD.songLabel}</div>
+          <div class="song-title">${CARD.songLabel || 'Our Song'}</div>
           <div class="song-artist">${CARD.senderName}'s pick</div>
         </div>
         <div class="bars" id="eq-bars"><i></i><i></i><i></i><i></i></div>
@@ -532,11 +561,11 @@ function musicMarkup(CARD){
   `;
 }
 
-// This does NOT create a new Audio — it wires the modal's UI to the single
-// bgAudio instance already playing in the background, so play/pause/seek
-// here control the exact same song the whole page is listening to.
+// Modal controls: connects specifically to favAudio (or bgAudio if same).
+// Ensures that while favourite music is playing, background music is STRICTLY paused.
 function startPlayer(root, CARD){
-  if(!CARD.musicUrl || !bgAudio) return;
+  const activePlayerAudio = favAudio || bgAudio;
+  if(!activePlayerAudio) return;
 
   const fill = root.querySelector('#seek-fill');
   const seekBar = root.querySelector('#seek-bar');
@@ -551,51 +580,77 @@ function startPlayer(root, CARD){
     return m + ':' + String(sec).padStart(2,'0');
   }
   function syncPlayState(){
-    const playing = !bgAudio.paused;
+    const playing = !activePlayerAudio.paused;
     playBtn.textContent = playing ? '⏸' : '▶';
     bars.classList.toggle('playing', playing);
   }
 
-  if(isFinite(bgAudio.duration)) timeTotal.textContent = fmt(bgAudio.duration);
-  timeNow.textContent = fmt(bgAudio.currentTime);
-  fill.style.width = ((bgAudio.currentTime / bgAudio.duration) * 100 || 0) + '%';
+  if(isFinite(activePlayerAudio.duration)) timeTotal.textContent = fmt(activePlayerAudio.duration);
+  timeNow.textContent = fmt(activePlayerAudio.currentTime);
+  fill.style.width = ((activePlayerAudio.currentTime / activePlayerAudio.duration) * 100 || 0) + '%';
   syncPlayState();
 
-  const onLoaded = ()=> timeTotal.textContent = fmt(bgAudio.duration);
+  const onLoaded = ()=> timeTotal.textContent = fmt(activePlayerAudio.duration);
   const onTime = ()=>{
-    fill.style.width = ((bgAudio.currentTime / bgAudio.duration) * 100 || 0) + '%';
-    timeNow.textContent = fmt(bgAudio.currentTime);
+    fill.style.width = ((activePlayerAudio.currentTime / activePlayerAudio.duration) * 100 || 0) + '%';
+    timeNow.textContent = fmt(activePlayerAudio.currentTime);
   };
-  bgAudio.addEventListener('loadedmetadata', onLoaded);
-  bgAudio.addEventListener('timeupdate', onTime);
-  bgAudio.addEventListener('play', syncPlayState);
-  bgAudio.addEventListener('pause', syncPlayState);
+  const onEnded = ()=>{
+    syncPlayState();
+    // Song khatam hone par background music resume ho sake agar user chahe
+    if(bgWasPlayingBeforeModal && bgAudio && bgAudio.paused){
+      bgAudio.play().catch(()=>{});
+      bgWasPlayingBeforeModal = false;
+    }
+  };
 
-  // clean up listeners once this modal instance is gone, so repeated
-  // opens don't stack duplicate handlers on the shared audio object
+  activePlayerAudio.addEventListener('loadedmetadata', onLoaded);
+  activePlayerAudio.addEventListener('timeupdate', onTime);
+  activePlayerAudio.addEventListener('play', syncPlayState);
+  activePlayerAudio.addEventListener('pause', syncPlayState);
+  activePlayerAudio.addEventListener('ended', onEnded);
+
   overlay.addEventListener('transitionend', function cleanup(){
     if(overlay.classList.contains('show')) return;
-    bgAudio.removeEventListener('loadedmetadata', onLoaded);
-    bgAudio.removeEventListener('timeupdate', onTime);
-    bgAudio.removeEventListener('play', syncPlayState);
-    bgAudio.removeEventListener('pause', syncPlayState);
+    activePlayerAudio.removeEventListener('loadedmetadata', onLoaded);
+    activePlayerAudio.removeEventListener('timeupdate', onTime);
+    activePlayerAudio.removeEventListener('play', syncPlayState);
+    activePlayerAudio.removeEventListener('pause', syncPlayState);
+    activePlayerAudio.removeEventListener('ended', onEnded);
     overlay.removeEventListener('transitionend', cleanup);
   }, { once:true });
 
+  // Autoplay favourite song when modal opens
+  if(activePlayerAudio.paused){
+    if(bgAudio && !bgAudio.paused){
+      bgWasPlayingBeforeModal = true;
+      bgAudio.pause();
+    }
+    activePlayerAudio.play().catch(()=>{});
+  }
+
   playBtn.addEventListener('click', ()=>{
-    if(bgAudio.paused) bgAudio.play().catch(()=>{});
-    else bgAudio.pause();
+    if(activePlayerAudio.paused){
+      if(bgAudio && !bgAudio.paused){
+        bgWasPlayingBeforeModal = true;
+        bgAudio.pause();
+      }
+      activePlayerAudio.play().catch(()=>{});
+    } else {
+      activePlayerAudio.pause();
+    }
   });
+
   root.querySelector('#rewind-btn').addEventListener('click', ()=>{
-    bgAudio.currentTime = Math.max(0, bgAudio.currentTime - 5);
+    activePlayerAudio.currentTime = Math.max(0, activePlayerAudio.currentTime - 5);
   });
   root.querySelector('#forward-btn').addEventListener('click', ()=>{
-    bgAudio.currentTime = Math.min(bgAudio.duration || 0, bgAudio.currentTime + 5);
+    activePlayerAudio.currentTime = Math.min(activePlayerAudio.duration || 0, activePlayerAudio.currentTime + 5);
   });
   seekBar.addEventListener('click', (e)=>{
     const rect = seekBar.getBoundingClientRect();
     const pct = (e.clientX - rect.left) / rect.width;
-    if(isFinite(bgAudio.duration)) bgAudio.currentTime = pct * bgAudio.duration;
+    if(isFinite(activePlayerAudio.duration)) activePlayerAudio.currentTime = pct * activePlayerAudio.duration;
   });
 }
 
@@ -631,7 +686,9 @@ document.getElementById('replay-btn').addEventListener('click', ()=>{
   // top, instead of the reveal song landing on top of background music
   // that was still playing from the previous run.
   if(revealAudio){ revealAudio.pause(); revealAudio.currentTime = 0; }
+  if(favAudio){ favAudio.pause(); favAudio.currentTime = 0; }
   if(bgAudio){ bgAudio.pause(); }
+  bgWasPlayingBeforeModal = false;
   goTo('screen-1');
 });
 
